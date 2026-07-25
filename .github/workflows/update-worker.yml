@@ -1,20 +1,18 @@
 name: Auto Update Worker
 
-# 工作流触发规则
 on:
   push:
     branches:
-      - main          # main分支推送代码自动运行
+      - main
   schedule:
-    - cron: "0 1 * * *" # 每日凌晨1点定时执行
+    - cron: "0 1 * * *" # 每天凌晨1点自动运行
   workflow_dispatch:
     inputs:
       update_latest:
-        description: '是否手动强制更新 v4.2.3（忽略本地版本）'
+        description: '是否手动更新 Latest 正式版？'
         required: false
         default: 'false'
 
-# 仓库权限，允许提交推送代码
 permissions:
   contents: write
 
@@ -22,11 +20,9 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      # 拉取仓库代码至运行环境
       - name: 初始化仓库
         uses: actions/checkout@v4
 
-      # 读取本地记录的版本号
       - name: 获取当前本地版本
         id: get_local_version
         run: |
@@ -37,71 +33,69 @@ jobs:
           fi
           echo "LOCAL_VERSION=$LOCAL_VERSION" >> $GITHUB_ENV
 
-      # 请求GitHub API 获取v4.2.3下载地址，全局只请求一次
-      - name: 获取目标版本 v4.2.3 信息
-        id: get_target_release
+      - name: 固定获取 v4.2.3 版本信息
+        id: get_release
         run: |
-          API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases"
+          # 直接请求指定tag v4.2.3，不再遍历所有release
+          API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/tags/v4.2.3"
           RESPONSE=$(curl -s "$API_URL")
-          TARGET_TAG="v4.2.3"
-          # 匹配tag=v4.2.3 的worker.zip下载链接
-          DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r ".[] | select(.tag_name==\"$TARGET_TAG\") | .assets[] | select(.name==\"worker.zip\") | .browser_download_url")
 
-          # 校验下载链接是否存在，不存在直接终止任务
-          if [[ -z "$DOWNLOAD_URL" || "$DOWNLOAD_URL" == "null" ]]; then
-            echo "❌ 错误：无法找到 v4.2.3 的 worker.zip 安装包！"
-            exit 1
-          fi
+          TARGET_TAG="v4.2.3"
+          # 提取该版本下worker.zip下载链接
+          TARGET_DOWNLOAD=$(echo "$RESPONSE" | jq -r '.assets[] | select(.name=="worker.zip") | .browser_download_url')
 
           echo "TARGET_TAG=$TARGET_TAG" >> $GITHUB_ENV
-          echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_ENV
-          echo "目标锁定版本：$TARGET_TAG"
+          echo "TARGET_DOWNLOAD=$TARGET_DOWNLOAD" >> $GITHUB_ENV
 
-      # 自动更新逻辑：判断是否需要更新（仅作用于定时/push触发）
-      - name: 判断自动更新条件
-        id: check_auto_update
+          echo "锁定目标版本: $TARGET_TAG"
+          echo "文件下载地址: $TARGET_DOWNLOAD"
+
+      - name: 判断是否需要更新
+        id: check_update
         run: |
-          if [[ "$LOCAL_VERSION" == "$TARGET_TAG" ]]; then
-            echo "AUTO_UPDATE_REQUIRED=false" >> $GITHUB_ENV
-            echo "本地已是目标版本，自动更新跳过"
+          if [ "$LOCAL_VERSION" = "$TARGET_TAG" ]; then
+            echo "UPDATE_NEEDED=false" >> $GITHUB_ENV
+            echo "已经是目标版本 $TARGET_TAG，无需更新"
           else
-            echo "AUTO_UPDATE_REQUIRED=true" >> $GITHUB_ENV
-            echo "版本不一致，准备执行自动更新"
+            echo "UPDATE_NEEDED=true" >> $GITHUB_ENV
+            echo "当前版本不一致，准备更新至 $TARGET_TAG"
           fi
 
-      # 自动更新执行步骤
-      - name: 自动更新至 v4.2.3
-        if: env.AUTO_UPDATE_REQUIRED == 'true'
+      - name: 更新至 v4.2.3
+        if: env.UPDATE_NEEDED == 'true'
         run: |
-          # 删除除.git目录以外所有文件，兼容所有shell
-          find . -mindepth 1 ! -path ./.git\* -delete
-          wget -O worker.zip "${{ env.DOWNLOAD_URL }}"
+          shopt -s extglob
+          rm -rf !( .git )
+          wget -O worker.zip "$TARGET_DOWNLOAD"
           unzip -o worker.zip
           rm worker.zip
-          echo "${{ env.TARGET_TAG }}" > version.txt
+          echo "$TARGET_TAG" > version.txt
 
-      # 自动更新代码提交推送
-      - name: 提交自动更新变更
-        if: env.AUTO_UPDATE_REQUIRED == 'true'
+      - name: 提交更新
+        if: env.UPDATE_NEEDED == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "🔄 自动同步固定版本 Worker：${{ env.TARGET_TAG }}"
           commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           push_options: --force
 
-      # 手动强制更新（update_latest=true 触发，无视本地版本，直接复用已获取的下载链接）
-      - name: 手动强制更新 v4.2.3
+      # 如果你仍然想保留原来手动更新Latest的入口（可选，不需要直接删除下面整块）
+      - name: 手动更新 Latest
         if: ${{ github.event.inputs.update_latest == 'true' }}
         run: |
-          echo "手动触发，强制重装 ${{ env.TARGET_TAG }}"
-          find . -mindepth 1 ! -path ./.git\* -delete
-          wget -O worker.zip "${{ env.DOWNLOAD_URL }}"
+          echo "开始手动更新 Latest 正式版"
+          API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest"
+          RESPONSE=$(curl -s "$API_URL")
+          LATEST_TAG=$(echo "$RESPONSE" | jq -r '.tag_name')
+          LATEST_DOWNLOAD=$(echo "$RESPONSE" | jq -r '.assets[] | select(.name=="worker.zip") | .browser_download_url')
+          shopt -s extglob
+          rm -rf !( .git )
+          wget -O worker.zip "$LATEST_DOWNLOAD"
           unzip -o worker.zip
           rm worker.zip
-          echo "${{ env.TARGET_TAG }}" > version.txt
-
+          echo "$LATEST_TAG" > version.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "🔄 手动触发同步固定版本 Worker：${{ env.TARGET_TAG }}"
+          git commit -m "🔄 手动同步 Latest Worker：$LATEST_TAG"
           git push --force
