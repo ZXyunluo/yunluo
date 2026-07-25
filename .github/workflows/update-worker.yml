@@ -1,5 +1,5 @@
 name: Auto Update Worker
-
+﻿
 on:
   push:
     branches:
@@ -12,17 +12,17 @@ on:
         description: '是否手动更新 Latest 正式版？'
         required: false
         default: 'false'
-
+﻿
 permissions:
   contents: write
-
+﻿
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
       - name: 初始化仓库
         uses: actions/checkout@v4
-
+﻿
       - name: 获取当前本地版本
         id: get_local_version
         run: |
@@ -32,66 +32,71 @@ jobs:
             LOCAL_VERSION=""
           fi
           echo "LOCAL_VERSION=$LOCAL_VERSION" >> $GITHUB_ENV
-
-      - name: 获取固定4.2.3版本信息
+﻿
+      - name: 获取最新 Pre-release 和 Latest
         id: get_release
         run: |
           API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases"
           RESPONSE=$(curl -s "$API_URL")
-
-          # 固定锁定版本 4.2.3
-          TARGET_TAG="4.2.3"
-          TARGET_DOWNLOAD=$(echo "$RESPONSE" | jq -r ".[] | select(.tag_name==\"$TARGET_TAG\") | .assets[] | select(.name==\"worker.zip\") | .browser_download_url")
-
-          echo "TARGET_TAG=$TARGET_TAG" >> $GITHUB_ENV
-          echo "TARGET_DOWNLOAD=$TARGET_DOWNLOAD" >> $GITHUB_ENV
-
-          echo "锁定更新目标版本: $TARGET_TAG"
-
-      - name: 判断是否需要更新到4.2.3
+﻿
+          # 最新 Pre-release
+          PRE_RELEASE_TAG=$(echo "$RESPONSE" | jq -r '.[] | select(.prerelease==true) | .tag_name' | head -n 1)
+          PRE_RELEASE_DOWNLOAD=$(echo "$RESPONSE" | jq -r '.[] | select(.prerelease==true) | .assets[] | select(.name=="worker.zip") | .browser_download_url' | head -n 1)
+﻿
+          # 最新正式版 Latest（仅提醒）
+          LATEST_TAG=$(echo "$RESPONSE" | jq -r '.[] | select(.prerelease==false) | .tag_name' | head -n 1)
+﻿
+          echo "PRE_RELEASE_TAG=$PRE_RELEASE_TAG" >> $GITHUB_ENV
+          echo "PRE_RELEASE_DOWNLOAD=$PRE_RELEASE_DOWNLOAD" >> $GITHUB_ENV
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+﻿
+          echo "最新 Pre-release: $PRE_RELEASE_TAG"
+          echo "最新正式版 Latest: $LATEST_TAG (仅提醒)"
+﻿
+      - name: 判断是否需要更新 Pre-release
         id: check_update
         run: |
-          if [ "$LOCAL_VERSION" = "$TARGET_TAG" ]; then
+          if [ "$LOCAL_VERSION" = "$PRE_RELEASE_TAG" ]; then
             echo "UPDATE_NEEDED=false" >> $GITHUB_ENV
-            echo "当前已是 $TARGET_TAG 版本，无需更新"
+            echo "已经是最新 Pre-release 版本"
           else
             echo "UPDATE_NEEDED=true" >> $GITHUB_ENV
-            echo "准备更新至目标版本 $TARGET_TAG"
+            echo "发现新 Pre-release 版本 $PRE_RELEASE_TAG"
           fi
-
-      - name: 更新至4.2.3
+﻿
+      - name: 更新 Pre-release
         if: env.UPDATE_NEEDED == 'true'
         run: |
           shopt -s extglob
           rm -rf !( .git )
-          wget -O worker.zip "$TARGET_DOWNLOAD"
+          wget -O worker.zip "$PRE_RELEASE_DOWNLOAD"
           unzip -o worker.zip
           rm worker.zip
-          echo "$TARGET_TAG" > version.txt
-
-      - name: 提交4.2.3版本更新
+          echo "$PRE_RELEASE_TAG" > version.txt
+﻿
+      - name: 提交 Pre-release 更新
         if: env.UPDATE_NEEDED == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔄 自动同步固定版本 Worker：${{ env.TARGET_TAG }}"
+          commit_message: "🔄 自动同步最新 Pre-release Worker：${{ env.PRE_RELEASE_TAG }}"
           commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           push_options: --force
-
-      - name: 手动触发也强制更新4.2.3（移除Latest逻辑，全部统一4.2.3）
+﻿
+      - name: 手动更新 Latest
         if: ${{ github.event.inputs.update_latest == 'true' }}
         run: |
-          echo "手动触发，强制更新至目标版本 $TARGET_TAG"
+          echo "开始手动更新 Latest 正式版 $LATEST_TAG"
           API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases"
           RESPONSE=$(curl -s "$API_URL")
-          TARGET_DOWNLOAD=$(echo "$RESPONSE" | jq -r ".[] | select(.tag_name==\"$TARGET_TAG\") | .assets[] | select(.name==\"worker.zip\") | .browser_download_url")
+          LATEST_DOWNLOAD=$(echo "$RESPONSE" | jq -r ".[] | select(.tag_name==\"$LATEST_TAG\") | .assets[] | select(.name==\"worker.zip\") | .browser_download_url")
           shopt -s extglob
           rm -rf !( .git )
-          wget -O worker.zip "$TARGET_DOWNLOAD"
+          wget -O worker.zip "$LATEST_DOWNLOAD"
           unzip -o worker.zip
           rm worker.zip
-          echo "$TARGET_TAG" > version.txt
+          echo "$LATEST_TAG" > version.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "🔄 手动触发同步固定版本 Worker：$TARGET_TAG"
+          git commit -m "🔄 手动同步 Latest Worker：$LATEST_TAG"
           git push --force
