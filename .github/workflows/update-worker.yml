@@ -44,7 +44,7 @@ jobs:
           API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases"
           RESPONSE=$(curl -s "$API_URL")
 
-          # 锁定目标版本标签，修正为带v前缀 v4.2.3
+          # 锁定目标版本标签，与上游tag完全一致 v4.2.3
           TARGET_TAG="v4.2.3"
           # 筛选tag=v4.2.3的发布，取出worker.zip下载链接
           TARGET_DOWNLOAD=$(echo "$RESPONSE" | jq -r ".[] | select(.tag_name==\"$TARGET_TAG\") | .assets[] | select(.name==\"worker.zip\") | .browser_download_url")
@@ -80,7 +80,7 @@ jobs:
       - name: 自动更新至v4.2.3
         if: env.UPDATE_NEEDED == 'true'
         run: |
-          # 替换extglob方案，兼容性更好，避免shell异常
+          # 兼容写法，删除除.git文件夹以外所有文件，替代不稳定的extglob
           find . -mindepth 1 ! -path ./.git\* -delete
           wget -O worker.zip "$TARGET_DOWNLOAD" # 下载安装包
           unzip -o worker.zip # 覆盖解压
@@ -101,6 +101,7 @@ jobs:
         if: ${{ github.event.inputs.update_latest == 'true' }}
         run: |
           echo "手动调度触发，强制重装目标版本 $TARGET_TAG，跳过版本判断"
+          # 复用API查询v4.2.3下载地址
           API_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases"
           RESPONSE=$(curl -s "$API_URL")
           TARGET_DOWNLOAD=$(echo "$RESPONSE" | jq -r ".[] | select(.tag_name==\"$TARGET_TAG\") | .assets[] | select(.name==\"worker.zip\") | .browser_download_url")
